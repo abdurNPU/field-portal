@@ -107,6 +107,7 @@ label.f{display:block;font-size:12px;color:var(--t3);margin:10px 0 4px}
 .cal button.alldone .c{color:var(--green)}
 #map{height:calc(100vh - 180px - var(--safe-b) - var(--safe-t));min-height:360px;border-radius:var(--rc);border:1px solid var(--line);background:#111}
 .leaflet-container{font-family:inherit;background:#111}
+.osm-dark{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.9) saturate(.6)}
 .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:#111;color:var(--t2);border:1px solid var(--line2)}
 .leaflet-popup-content{margin:10px 12px;font-size:13px}
 .leaflet-control-attribution{background:rgba(0,0,0,.6)!important;color:#aaa!important}
@@ -594,7 +595,10 @@ function legendHtml(){const L=MAPCOL==='rts'?[['#4CC38A','RTS 20+'],['#E0A84B','
   [['#C09F63','Today'],['#F0716B','Outstanding'],['#0099CC','This week'],['#E8E8E8','Later'],['#4CC38A','All done'],['#777','Not in plan']];return L.map(([c,l])=>'<span><i class="dot" style="background:'+c+'"></i>'+l+'</span>').join('')}
 function drawMap(){const el=$('#map');if(!el)return;if(typeof L==='undefined'){el.innerHTML='<div class="empty">The map needs an internet connection the first time. Reload when you have signal.</div>';return}
   if(MAP){MAP.remove();MAP=null}MAP=L.map(el,{zoomControl:true,attributionControl:true});
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:19,subdomains:'abcd',attribution:'&copy; OpenStreetMap contributors &copy; CARTO'}).addTo(MAP);
+  // OpenStreetMap needs no key; the tiles are darkened with a filter to match the portal. A CARTO key (Settings) switches to CARTO's dark map.
+  const ck=(DB.settings.cartoKey||'').trim();
+  if(ck)L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png?key='+encodeURIComponent(ck),{maxZoom:19,subdomains:'abcd',attribution:'&copy; OpenStreetMap contributors &copy; CARTO'}).addTo(MAP);
+  else L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,className:'osm-dark',attribution:'&copy; OpenStreetMap contributors'}).addTo(MAP);
   LAYER=L.layerGroup().addTo(MAP);const t=today(),ws=weekStart(t),we=addD(ws,6);const vs=visits();
   let ids;if(MAPF==='all')ids=Object.keys(DB.stores);else{let f=vs;if(MAPF==='today')f=vs.filter(v=>v.d===t);if(MAPF==='week')f=vs.filter(v=>v.d>=ws&&v.d<=we);if(MAPF==='overdue')f=vs.filter(v=>v.d<t&&!v.done);ids=[...new Set(f.map(v=>v.sid))]}
   const bounds=[];const H=DB.settings.home;L.circleMarker([H.lat,H.lng],{radius:6,color:'#fff',weight:2,fillColor:'#000',fillOpacity:1}).bindTooltip('Home').addTo(LAYER);
@@ -667,7 +671,7 @@ function viewMore(){const p=P();const pr=progress();let h='<h1 style="margin-top
   h+='<div class="sec-t"><h2>Work tools</h2></div><div class="card">'+
     [['summary','doc','Weekly summary for the brief'],['mileage','route','Mileage log and export'],['cal','cal','Add to calendar'],['clients','store','Clients and accounts'],['settings','pin','Home, hours and work days'],['backup','copy','Backup and restore'],['undoday','undo','Undo a day']].map(([a,i,l])=>'<button class="list-i" data-act="'+a+'">'+ic(i)+'<span class="grow">'+l+'</span>'+ic('move')+'</button>').join('')+'</div>';
   const bk=DB.lastBackup?daysBetween(DB.lastBackup,today()):null;if(bk==null||bk>7)h+='<div class="card small warn">'+ic('warn')+' '+(bk==null?'No backup yet.':'Last backup '+bk+' days ago.')+' Your ticks live on this phone only. <button class="link" data-act="backup">Back up now</button></div>';
-  h+='<p class="tiny muted" style="margin:16px 0">Data stays on this device. Map tiles come from CARTO and OpenStreetMap, postcodes from postcodes.io and drive times from OSRM. No call file data is sent to them, only coordinates.</p>';
+  h+='<p class="tiny muted" style="margin:16px 0">Data stays on this device. Map tiles come from OpenStreetMap (or CARTO if you add a key), postcodes from postcodes.io and drive times from OSRM. No call file data is sent to them, only coordinates.</p>';
   return h}
 function monthBars(){const vs=visits();const by={};vs.forEach(v=>{const m=v.d.slice(0,7);by[m]=by[m]||[0,0];by[m][1]++;if(v.done)by[m][0]++});
   return Object.keys(by).sort().map(m=>{const[d,n]=by[m];return '<div class="small row between" style="margin-top:8px"><span>'+MON[+m.slice(5)-1]+'</span><span class="muted">'+d+' of '+n+'</span></div><div class="bar"><i style="width:'+Math.round(d/n*100)+'%"></i></div>'}).join('')}
@@ -800,7 +804,7 @@ function settingsSheet(){const s=DB.settings;openSheet('<h2>Home, hours and work
   '<div class="row"><label class="grow"><span class="f">Leave home</span><input type="time" id="sStart" value="'+hm(s.start)+'"></label><label class="grow"><span class="f">Home by</span><input type="time" id="sFin" value="'+hm(s.finish)+'"></label></div>'+
   '<div class="row"><label class="grow"><span class="f">Latest on long days</span><input type="time" id="sHard" value="'+hm(s.hardFinish)+'"></label><label class="grow"><span class="f">Minutes per visit</span><input type="number" id="sVisit" value="'+s.visit+'" min="15" max="180"></label></div>'+
   '<label class="f" for="sTrip">Latest on overnight trip days</label><input type="time" id="sTrip" value="'+hm(s.tripFinish||1110)+'"><label class="f" for="sOver">Overnight when one way is more than (minutes)</label><input type="number" id="sOver" value="'+s.overnight+'" min="60" max="300">'+
-  '<span class="f">Work days</span><div class="chips">'+[1,2,3,4,5,6,0].map(w=>'<button class="chip" data-swd="'+w+'" aria-pressed="'+s.workDays.includes(w)+'">'+DOW[w]+'</button>').join('')+'</div><button class="btn gold wide" style="margin-top:12px" data-act="savesettings">Save</button>')}
+  '<label class="f" for="sKey">CARTO map key (optional, for the darker map style)</label><input type="text" id="sKey" value="'+esc(s.cartoKey||'')+'" placeholder="Leave empty to use OpenStreetMap" autocomplete="off">'+'<span class="f">Work days</span><div class="chips">'+[1,2,3,4,5,6,0].map(w=>'<button class="chip" data-swd="'+w+'" aria-pressed="'+s.workDays.includes(w)+'">'+DOW[w]+'</button>').join('')+'</div><button class="btn gold wide" style="margin-top:12px" data-act="savesettings">Save</button>')}
 function mileageSheet(){const ds=fieldDates().filter(d=>d<=today());const rows=ds.map(d=>{const o=DB.mileage[d];const tl=timeline(d);return{d,mi:o&&o.mi!=null?o.mi:tl.mi,plan:tl.mi,n:tl.vs.filter(v=>v.done).length,stores:tl.vs.map(v=>SN(v.sid)).join(', ')}});
   const wk={};rows.forEach(r=>{const w=weekStart(r.d);wk[w]=(wk[w]||0)+r.mi});
   openSheet('<h2>Mileage log</h2><p class="small muted">Planned miles per field day, home to home. Hotel legs are not counted. Edit a day to your odometer reading; the export uses your figures.</p><div class="card scroll-x"><table class="tbl"><tr><th>Day</th><th>Stores</th><th class="n">Miles</th></tr>'+
@@ -883,7 +887,7 @@ document.addEventListener('click',async e=>{const el=e.target.closest('button,a'
     case 'addclient':{const n=$('#newClient').value.trim();if(!n)break;const id=n.toLowerCase().replace(/[^a-z0-9]+/g,'-');if(!DB.clients.some(c=>c.id===id))DB.clients.push({id,name:n,color:'#0099CC'});DB.client=id;save();clientsSheet();render();break}
     case 'settings':settingsSheet();break;
     case 'sethome':{const q=$('#sHome').value.trim();try{const j=await (await fetch('https://api.postcodes.io/postcodes/'+encodeURIComponent(q))).json();if(j.result){DB.settings.home={lat:j.result.latitude,lng:j.result.longitude};DB.settings.homeName=q.toUpperCase();save();settingsSheet();toast('Home set')}else toast('Postcode not found')}catch(err){toast('Needs a connection')}break}
-    case 'savesettings':{const s=DB.settings;const tm=x=>{const[a,b]=x.split(':').map(Number);return a*60+b};s.start=tm($('#sStart').value);s.finish=tm($('#sFin').value);s.hardFinish=tm($('#sHard').value);s.tripFinish=tm($('#sTrip').value);s.visit=+$('#sVisit').value||45;s.overnight=+$('#sOver').value||135;
+    case 'savesettings':{const s=DB.settings;const tm=x=>{const[a,b]=x.split(':').map(Number);return a*60+b};s.start=tm($('#sStart').value);s.finish=tm($('#sFin').value);s.hardFinish=tm($('#sHard').value);s.tripFinish=tm($('#sTrip').value);s.visit=+$('#sVisit').value||45;s.overnight=+$('#sOver').value||135;s.cartoKey=$('#sKey').value.trim();
       s.workDays=[...document.querySelectorAll('[data-swd]')].filter(b=>b.getAttribute('aria-pressed')==='true').map(b=>+b.dataset.swd);save();closeSheet();render();toast('Saved');break}
     case 'backup':backupSheet();break;
     case 'dobackup':DB.lastBackup=today();save();download('Field_plan_backup_'+today()+'.json',JSON.stringify(DB),'application/json');toast('Backup downloaded');break;
