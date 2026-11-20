@@ -840,7 +840,7 @@ function weeklySummary(ws){const we=addD(ws,6);const vs=visits().filter(v=>v.don
     a1!=null?'Average RTS: '+a1.toFixed(1)+'/25 across '+hs.length+' scored visits'+(a0!=null?' ('+(a1>=a0?'+':'')+(a1-a0).toFixed(1)+' vs the previous 4 weeks)':''):'No RTS scores on record for this week yet',
     weak?'Weakest area: '+nm[weak[0]]+' ('+Math.round(weak[1]*100)+'% of max)':'',
     low.length?'Lowest scores: '+low.map(h=>SN(h.sid)+' '+h.tot).join(', '):'',
-    (()=>{const S=DB.sales[DB.client];if(!S)return'';const lim=isoYear(ws)+'-W'+pad(isoWeek(ws));const per=S.periods.filter(p=>/^\d{4}-W\d{2}$/.test(p)&&p<lim).pop();if(!per)return'';const st=Object.values(S.by).reduce((a,b)=>a+(b.p[per]?b.p[per][0]:0),0);if(!st&&!(S.online||{})[per])return'';return 'Sell-out '+perLabel(per)+' (latest in the sales file): '+fmtN(st)+' units across Currys stores'+((S.online||{})[per]?' (online '+fmtN(S.online[per])+' for comparison)':'')})(),
+    (()=>{const S=DB.sales[DB.client];if(!S)return'';const lim=isoYear(ws)+'-W'+pad(isoWeek(ws));const per=S.periods.filter(p=>/^\d{4}-W\d{2}$/.test(p)&&p<lim).pop();if(!per)return'';const st=Object.values(S.by).reduce((a,b)=>a+(b.p[per]?b.p[per][0]:0),0);if(!st&&!(S.online||{})[per])return'';return 'Sell-out '+perLabel(per)+' (latest in the sales file): '+fmtN(st)+' units across Currys stores'})(),
     pr?'Quarter progress: '+pr.doneQ+' of '+pr.qt+' visits ('+(pr.gap===0?'on pace':pr.gap>0?pr.gap+' ahead of plan':(-pr.gap)+' behind plan')+')':''].filter(Boolean);
   return lines.join('\n')}
 function summarySheet(){const ws=weekStart(today());const opts=[0,-7,-14,-21].map(o=>addD(ws,o));
@@ -895,8 +895,10 @@ function peopleHtml(sid){const cs=contactsOf(sid);
   return '<div class="sec-t"><h2>People</h2><button class="link" data-act="addcontact" data-sid="'+sid+'">Add</button></div><div class="card">'+(cs.length?cs.slice(0,8).map(c=>'<div class="row between" style="padding:6px 0;border-top:1px solid var(--line)"><span><b style="color:var(--t1)">'+esc(c.n)+'</b> <span class="small muted">'+esc(c.r||'')+'</span></span><span class="tiny muted">'+(c.src==='you'?'added by you'+(c.src==='you'?' <button class="link" data-delcontact="'+esc(c.n)+'" data-sid="'+sid+'" aria-label="Remove '+esc(c.n)+'">Remove</button>':''):c.d?'mentioned '+short(c.d):'')+'</span></div>').join('').replace('border-top:1px solid var(--line)','border-top:0'):'<p class="small muted">No names found in the visit notes yet. Tap Add to save the Gaming Expert or manager you deal with.</p>')+'</div>'}
 function askFor(sid){const cs=contactsOf(sid).slice(0,2);return cs.length?'<span>Ask for <b style="color:var(--t1)">'+cs.map(c=>esc(c.n)+(c.r?' ('+esc(c.r)+')':'')).join(', ')+'</b></span>':''}
 // ===== Reports: one 16:9 slide per week, month or quarter, drawn on a canvas in the house style
-let REPK='week',REPKEY=null;
+let REPK='week',REPKEY=null,REPS='all';
 function fillGaps(ws){const out=[];ws.forEach((w,i)=>{if(i){let d=addD(wkMonday(ws[i-1]),7);let g=0;while(d<wkMonday(w)&&g<4){const k=isoYear(d)+'-W'+pad(isoWeek(d));out.push(k);d=addD(d,7);g++}}out.push(w)});return out}
+function patchOf(p){return new Set((p.patch||[]).concat(visits(p).map(v=>v.sid)))}
+function patchFor(from,to){const pl=plansOf(DB.client);const cover=pl.find(p=>(p.qStart||p.start)<=to&&(p.qEnd||p.end)>=from);return cover?patchOf(cover):myStores()}
 function myStores(){const P0=P();const pl=plansOf(DB.client);const act=P0&&P0.client===DB.client?[P0]:pl.slice(0,1);return new Set(act.flatMap(p=>(p.patch||[]).concat(visits(p).map(v=>v.sid))).concat((DB.todo&&DB.todo[DB.client]||[]).map(x=>x.sid)))}
 const wkMonday=k=>{const[y,w]=[+k.slice(0,4),+k.slice(6)];const j4=new Date(y,0,4);const d=new Date(j4);d.setDate(j4.getDate()-((j4.getDay()+6)%7)+(w-1)*7);return iso(d)};
 const wkThu=k=>addD(wkMonday(k),3);
@@ -904,24 +906,25 @@ function repWeeks(){const S=DB.sales[DB.client];return S?S.periods.filter(p=>/^\
 function repKeyOf(kind,wk){const t=wkThu(wk);if(kind==='week')return wk;if(kind==='month')return t.slice(0,7);return t.slice(0,4)+'-Q'+(Math.floor((+t.slice(5,7)-1)/3)+1)}
 function repKeys(kind){return [...new Set(repWeeks().map(w=>repKeyOf(kind,w)))]}
 function repLabel(kind,key,part){if(kind==='week')return perLabel(key);if(kind==='month')return MON[+key.slice(5)-1]+' '+key.slice(0,4)+(part?' to date':'');return key.slice(5)+' '+key.slice(0,4)}
-function repData(kind,key){const S=DB.sales[DB.client];const all=repWeeks();const weeks=all.filter(w=>repKeyOf(kind,w)===key);
+function repData(kind,key,scope){scope=scope||'all';const S=DB.sales[DB.client];const all=repWeeks();const weeks=all.filter(w=>repKeyOf(kind,w)===key);
   const keys=repKeys(kind);const pk=keys[keys.indexOf(key)-1]||null;const pweeks=pk?all.filter(w=>repKeyOf(kind,w)===pk):[];
-  const mine=myStores();
+  const f0=weeks.length?wkMonday(weeks[0]):today(),t0=weeks.length?addD(wkMonday(weeks[weeks.length-1]),6):today();
+  const mine=patchFor(f0,t0);const inScope=scope==='patch'?(s=>mine.has(s)):(()=>true);const scopeIds=Object.keys(S.by).filter(inScope);
   const u=(sid,ws)=>{const b=S.by[sid];return b?ws.reduce((a,w)=>a+(b.p[w]?b.p[w][0]:0),0):0};
   const sum=(ws,only)=>Object.keys(S.by).filter(s=>!only||only.has(s)).reduce((a,s)=>a+u(s,ws),0);
-  const my=sum(weeks,mine),myP=sum(pweeks,mine),ch=sum(weeks),chP=sum(pweeks);const on=weeks.reduce((a,w)=>a+((S.online||{})[w]||0),0),onP=pweeks.reduce((a,w)=>a+((S.online||{})[w]||0),0);
+  const my=sum(weeks,mine),myP=sum(pweeks,mine),chAll=sum(weeks),ch=scope==='patch'?my:chAll,chP=scope==='patch'?myP:sum(pweeks);const on=weeks.reduce((a,w)=>a+((S.online||{})[w]||0),0),onP=pweeks.reduce((a,w)=>a+((S.online||{})[w]||0),0);
   const avg=(x,ws)=>ws.length?x/ws.length:0;const pct=(a,b)=>b?Math.round((a-b)/b*100):null;
   const cmpWeekly=kind!=='week';
-  const myChg=pct(cmpWeekly?avg(my,weeks):my,cmpWeekly?avg(myP,pweeks):myP),onChg=pct(cmpWeekly?avg(on,weeks):on,cmpWeekly?avg(onP,pweeks):onP);
+  const chChg=pct(cmpWeekly?avg(ch,weeks):ch,cmpWeekly?avg(chP,pweeks):chP),myChg=pct(cmpWeekly?avg(my,weeks):my,cmpWeekly?avg(myP,pweeks):myP),onChg=pct(cmpWeekly?avg(on,weeks):on,cmpWeekly?avg(onP,pweeks):onP);
   // visits and RTS in the period's dates
   const from=weeks.length?wkMonday(weeks[0]):null,to=weeks.length?addD(wkMonday(weeks[weeks.length-1]),6):null;const vis=new Set();
   plansOf(DB.client).forEach(p=>{const dn=DB.done[p.id]||{};for(const k in dn){const d=dn[k];if(d>=from&&d<=to)vis.add(k.split('#')[1]+'|'+d)}});
   const hs=DB.history.filter(h=>h.c===DB.client&&mine.has(h.sid)&&h.d>=from&&h.d<=to);hs.forEach(h=>vis.add(h.sid+'|'+h.d));
   const sc=hs.filter(h=>h.tot!=null);const rts=sc.length?sc.reduce((a,h)=>a+h.tot,0)/sc.length:null;
   // stores and products
-  const rows=[...mine].filter(s=>S.by[s]).map(s=>{const c=avg(u(s,weeks),weeks),p=pweeks.length?avg(u(s,pweeks),pweeks):null;return{s,c,p,d:p==null?0:c-p}});
+  const rows=scopeIds.map(s=>{const c=avg(u(s,weeks),weeks),p=pweeks.length?avg(u(s,pweeks),pweeks):null;return{s,c,p,d:p==null?0:c-p}});
   const gains=rows.filter(r=>r.p!=null&&r.d>0).sort((a,b)=>b.d-a.d).slice(0,4);const drops=rows.filter(r=>r.p!=null&&r.d<0).sort((a,b)=>a.d-b.d).slice(0,3);
-  const pr={};[...mine].forEach(s=>{const b=S.by[s];if(!b||!b.pw)return;weeks.forEach(w=>{const x=b.pw[w];if(x)for(const n in x)pr[n]=(pr[n]||0)+x[n]})});
+  const pr={};scopeIds.forEach(s=>{const b=S.by[s];if(!b||!b.pw)return;weeks.forEach(w=>{const x=b.pw[w];if(x)for(const n in x)pr[n]=(pr[n]||0)+x[n]})});
   const prods=Object.entries(pr).sort((a,b)=>b[1]-a[1]).slice(0,4);
   // chart: the period's weeks plus earlier weeks for context
   const idx=all.indexOf(weeks[weeks.length-1]);const n=kind==='week'?8:kind==='month'?Math.max(8,weeks.length+4):Math.max(13,weeks.length);const cw=all.slice(Math.max(0,idx-n+1),idx+1);
@@ -929,10 +932,13 @@ function repData(kind,key){const S=DB.sales[DB.client];const all=repWeeks();cons
   // year on year: my stores when last year's store data covers the same weeks, otherwise Razer across all Currys channels
   let yoy=null;const lyW=w=>(+w.slice(0,4)-1)+'-W'+w.slice(6);
   const allW=[...new Set(all.filter(w=>repKeyOf(kind,w)===key).concat(Object.keys(S.chain||{}).filter(w=>repKeyOf(kind,w)===key)))].sort();
-  if(weeks.length&&weeks.every(w=>all.includes(lyW(w)))){const ly=sum(weeks.map(lyW),mine);if(ly)yoy={scope:'mine',ty:my,ly,pct:pct(my,ly)}}
-  if(!yoy&&S.chain){const cw=allW.filter(w=>S.chain[w]&&S.chain[w].py);if(cw.length){const ty=cw.reduce((a,w)=>a+S.chain[w].u,0),ly=cw.reduce((a,w)=>a+S.chain[w].py,0);yoy={scope:'chain',ty,ly,pct:pct(ty,ly),weeks:cw}}}
-  return{yoy,kind,key,label:repLabel(kind,key)+(partial&&kind==='quarter'?' to date':'')+(partial&&kind==='month'?' to date':''),partial,plabel:pk?repLabel(kind,pk):null,weeks,pweeks,mine,my,myP,ch,on,onP,myChg,onChg,share:ch?my/ch*100:null,visits:vis.size,rts,rtsN:sc.length,gains,drops,prods,
-    chart:fillGaps(cw).map(w=>({w,v:all.includes(w)?sum([w],mine):null,cur:weeks.includes(w)})),cmpWeekly,files:(S.files||[]).map(f=>f.name.split(' / ')[0])}}
+  // store sales only, over the weeks that exist in both years
+  const both=weeks.filter(w=>all.includes(lyW(w)));if(both.length){const only=scope==='patch'?mine:null;const ty=sum(both,only),ly=sum(both.map(lyW),only);if(ly)yoy={scope:'stores',ty,ly,pct:pct(ty,ly),weeks:both,partial:both.length<weeks.length}}
+  if(false&&!yoy&&S.chain){const cw=allW.filter(w=>S.chain[w]&&S.chain[w].py);if(cw.length){const ty=cw.reduce((a,w)=>a+S.chain[w].u,0),ly=cw.reduce((a,w)=>a+S.chain[w].py,0);yoy={scope:'chain',ty,ly,pct:pct(ty,ly),weeks:cw}}}
+  const lyY=+(kind==='week'?key:key).slice(0,4)-1;const rng=yoy&&yoy.partial?' ('+perLabel(yoy.weeks[0]).replace(/ \d{4}$/,'')+(yoy.weeks.length>1?' to '+perLabel(yoy.weeks[yoy.weeks.length-1]).replace(/ \d{4}$/,''):'')+')':'';
+  const lyLabel=kind==='week'?perLabel(key).replace(/ \d{4}$/,'')+' '+lyY:(kind==='month'?MON[+key.slice(5)-1]:key.slice(5))+' '+lyY,lyRange=kind!=='week'&&(partial||rng)?'same weeks'+rng:'';
+  return{lyLabel,lyRange,yoy,kind,key,label:repLabel(kind,key)+(partial&&kind==='quarter'?' to date':'')+(partial&&kind==='month'?' to date':''),partial,plabel:pk?repLabel(kind,pk):null,weeks,pweeks,mine,my,myP,ch,on,onP,myChg,onChg,share:chAll?my/chAll*100:null,visits:vis.size,rts,rtsN:sc.length,gains,drops,prods,
+    scope,chAll,nPatch:mine.size,chart:fillGaps(cw).map(w=>({w,v:all.includes(w)?(scope==='patch'?sum([w],mine):sum([w])):null,cur:weeks.includes(w)})),chChg,chP,selW:weeks.map(w=>scopeIds.filter(s=>u(s,[w])>0).length),selWP:pweeks.map(w=>scopeIds.filter(s=>u(s,[w])>0).length),cmpWeekly,files:(S.files||[]).map(f=>f.name.split(' / ')[0])}}
 const imgCache={};function loadImg(src){return imgCache[src]||(imgCache[src]=new Promise(r=>{if(!src)return r(null);const i=new Image();i.onload=()=>r(i);i.onerror=()=>r(null);i.src=src}))}
 async function drawReport(cv,R){const W=1920,H=1080;cv.width=W;cv.height=H;const x=cv.getContext('2d');
   try{await Promise.all(['400 22px Poppins','600 22px Poppins','700 40px Poppins','700 60px Poppins'].map(f=>document.fonts.load(f)))}catch(e){}
@@ -941,52 +947,60 @@ async function drawReport(cv,R){const W=1920,H=1080;cv.width=W;cv.height=H;const
   const g=x.createRadialGradient(140,90,0,140,90,900);g.addColorStop(0,'rgba(0,102,153,.26)');g.addColorStop(1,'rgba(0,102,153,0)');x.fillStyle=g;x.fillRect(0,0,W,H);
   const mx=128,my=96;x.textBaseline='alphabetic';
   // head row: eyebrow, statement, logos, rule
-  x.fillStyle=BL;x.font=F(600,16);const eb=(R.kind==='week'?'Weekly':R.kind==='month'?'Monthly':'Quarterly')+' business update · '+C().name+' in Currys stores · '+R.label;x.fillText(eb.toUpperCase().split('').join(String.fromCharCode(8202)),mx,my+14);
+  x.fillStyle=BL;x.font=F(600,16);const eb=(R.kind==='week'?'Weekly':R.kind==='month'?'Monthly':'Quarterly')+' business update · '+C().name+' in Currys stores · '+(R.scope==='patch'?'My patch · ':'')+R.label;x.fillText(eb.toUpperCase().split('').join(String.fromCharCode(8202)),mx,my+14);
   const wrap=(t,maxW,f)=>{x.font=f;const ws=t.split(' ');const L=[];let l='';ws.forEach(w=>{const tt=l?l+' '+w:w;if(x.measureText(tt).width>maxW&&l){L.push(l);l=w}else l=tt});if(l)L.push(l);return L};
   const sgn=v=>v==null?'':(v>0?'up '+v+'%':v<0?'down '+(-v)+'%':'level');
-  const Y=R.yoy;const yy=Y&&Y.pct!=null?(Y.scope==='mine'?' and '+sgn(Y.pct)+' on last year':', and '+C().name+' across Currys was '+sgn(Y.pct)+' on last year'):'';
-  const head=R.my?('Stores sold '+fmtN(R.my)+' units in '+R.label+(R.myChg!=null?', '+sgn(R.myChg)+(R.cmpWeekly?' a week':'')+' on '+R.plabel:'')+yy+'.'):'No sales recorded for my stores in '+R.label+'.';
+  const Y=R.yoy;const yy=Y&&Y.pct!=null?', and '+sgn(Y.pct)+' on '+R.lyLabel+(R.lyRange?' (same weeks)':''):'';
+  const head=R.ch?((R.scope==='patch'?'My patch sold ':C().name+' sold ')+fmtN(R.ch)+' units in '+(R.scope==='patch'?'':'Currys stores in ')+R.label+(R.chChg!=null?', '+sgn(R.chChg)+(R.cmpWeekly?' a week':'')+' on '+R.plabel:'')+yy+'.'):'No store sales recorded for '+R.label+'.';
   x.fillStyle='#fff';const hl=wrap(head,1380,F(700,40)).slice(0,2);hl.forEach((l,i)=>x.fillText(l,mx,my+70+i*52));
   const g0=R.gains[0],d0=R.drops[0];const sub=[g0?SN(g0.s)+' led the gains ('+fmtN(g0.c)+' a week, up from '+fmtN(g0.p)+')':'',d0?SN(d0.s)+' slipped ('+fmtN(d0.c)+', down from '+fmtN(d0.p)+')':''].filter(Boolean).join('. ')+(g0||d0?'.':'');
-  const yl=Y&&Y.pct!=null?('Year on year'+(Y.scope==='mine'?', my stores: ':', '+C().name+' in all Currys channels'+(R.kind==='week'?'':' ('+Y.weeks.map(perLabel).join(', ')+')')+': ')+fmtN(Y.ty)+' units against '+fmtN(Y.ly)+' last year.'):'';
-  const subs=[yl,sub].filter(Boolean);const subY=my+70+hl.length*52+4;x.fillStyle=T2;x.font=F(400,22);subs.forEach((l,i)=>{let t=l;while(x.measureText(t).width>1500&&t.length>10)t=t.slice(0,-2);x.fillText(t===l?l:t.trim()+'…',mx,subY+i*32)});const subEnd=subY+Math.max(0,subs.length-1)*32;
+  const yl=Y&&Y.pct!=null?('Year on year'+(Y.scope==='stores'?', Currys stores: ':', '+C().name+' in all Currys channels'+(R.kind==='week'?'':' ('+Y.weeks.map(perLabel).join(', ')+')')+': ')+fmtN(Y.ty)+' units against '+fmtN(Y.ly)+' last year.'):'';
+  const subs=[];const subY=my+70+hl.length*52+4;x.fillStyle=T2;x.font=F(400,22);subs.forEach((l,i)=>{let t=l;while(x.measureText(t).width>1500&&t.length>10)t=t.slice(0,-2);x.fillText(t===l?l:t.trim()+'…',mx,subY+i*32)});const subEnd=subY+Math.max(0,subs.length-1)*32;
   const npu=await loadImg(document.querySelector('header.top img').src),cl=await loadImg(C().logo);let lx=W-mx;
   if(npu){const h=34,w=npu.width*h/npu.height;lx-=w;x.drawImage(npu,lx,my-4,w,h)}
   if(cl){const h=52,w=Math.min(260,cl.width*h/cl.height),hh=w*cl.height/cl.width;lx-=w+56;x.drawImage(cl,lx,my-4+(34-hh)/2,w,hh)}
   const ry=(subs.length?subEnd:subY-30)+34;x.fillStyle='rgba(255,255,255,.16)';x.fillRect(mx,ry,W-2*mx,1);const top2=ry+226;
   // KPI row
-  const kp=[[fmtN(R.my),'units sold in my stores',R.myChg,R.cmpWeekly?'weekly average vs '+R.plabel:'vs '+R.plabel],[R.share!=null?R.share.toFixed(1)+'%':'-','share of '+C().name+' sales in Currys stores',null,fmtN(R.ch)+' units across all stores'],[String(R.visits),'store visits completed',null,R.rts!=null?'average RTS '+R.rts.toFixed(1)+' of 25 ('+R.rtsN+' scored)':'no RTS scores on record'],[fmtN(R.on),'online units, for comparison',R.onChg,R.plabel?(R.cmpWeekly?'weekly average vs ':'vs ')+R.plabel:'']];
+  const vs=R.plabel?(R.cmpWeekly?'weekly average vs ':'vs ')+R.plabel:'';
+  // stores selling and units per selling store are weekly figures, averaged over the weeks of a month or quarter
+  const tot=a=>a.reduce((p,q)=>p+q,0);const nS=R.selW.length?tot(R.selW)/R.selW.length:0,nSP=R.selWP.length?tot(R.selWP)/R.selWP.length:0;
+  const ps=tot(R.selW)?R.ch/tot(R.selW):null,psP=tot(R.selWP)?R.chP/tot(R.selWP):null;const psChg=ps!=null&&psP?Math.round((ps-psP)/psP*100):null;
+  const ly=R.lyLabel;const yv=Y&&Y.pct!=null?(Y.pct>=0?'+':'−')+Math.abs(Y.pct)+'%':'n/a';
+  const kp=[[fmtN(R.ch),R.scope==='patch'?'units sold in my patch':'units sold in Currys stores',R.chChg,vs,R.scope==='patch'&&R.share!=null?R.share.toFixed(1)+'% of all Currys store sales':''],
+    [yv,'vs '+ly,null,Y&&Y.pct!=null?(R.lyRange?R.lyRange.replace('same weeks (','').replace(')','')+': ':'')+fmtN(Y.ty)+' against '+fmtN(Y.ly)+' units':'no store sales on file for '+ly+' yet',null,Y&&Y.pct!=null?(Y.pct>=0?UP:DN):T3],
+    [fmtN(nS),'stores selling '+C().name+(R.cmpWeekly?', a week':''),nSP?Math.round((nS-nSP)/nSP*100):null,vs],[ps!=null?ps.toFixed(1):'-','average units per selling store, a week',psChg,vs]];
   const tri=(tx0,ty0,up)=>{x.beginPath();if(up){x.moveTo(tx0,ty0+6);x.lineTo(tx0+14,ty0+6);x.lineTo(tx0+7,ty0-6)}else{x.moveTo(tx0,ty0-6);x.lineTo(tx0+14,ty0-6);x.lineTo(tx0+7,ty0+6)}x.closePath();x.fill()};
-  const cw4=(W-2*mx)/4;kp.forEach((k,i)=>{const kx=mx+i*cw4;x.fillStyle='#fff';x.font=F(700,60);x.fillText(k[0],kx,ry+92);x.fillStyle=T2;x.font=F(400,20);x.fillText(k[1],kx,ry+128);
-    let tx=kx;if(k[2]!=null){x.fillStyle=k[2]>=0?UP:DN;tri(kx,ry+152,k[2]>=0);x.font=F(600,18);const s=Math.abs(k[2])+'%';x.fillText(s,kx+20,ry+158);tx+=20+x.measureText(s).width+12}x.fillStyle=T3;x.font=F(400,16);x.fillText(k[3],tx,ry+158)});
+  const cw4=(W-2*mx)/4;kp.forEach((k,i)=>{const kx=mx+i*cw4;x.fillStyle=k[5]||'#fff';x.font=F(700,60);x.fillText(k[0],kx,ry+92);const fit=(t,wd)=>{let s=String(t);if(x.measureText(s).width<=wd)return s;while(s.length>4&&x.measureText(s+'…').width>wd)s=s.slice(0,-1);return s.trim()+'…'};x.fillStyle=T2;x.font=F(400,20);x.fillText(fit(k[1],cw4-24),kx,ry+128);
+    let tx=kx;if(k[2]!=null){x.fillStyle=k[2]>=0?UP:DN;tri(kx,ry+152,k[2]>=0);x.font=F(600,18);const s=Math.abs(k[2])+'%';x.fillText(s,kx+20,ry+158);tx+=20+x.measureText(s).width+12}x.fillStyle=T3;x.font=F(400,16);x.fillText(fit(k[3],cw4-24-(tx-kx)),tx,ry+158);if(k[4]){x.fillText(fit(k[4],cw4-24),kx,ry+184)}});
   // chart: units by week, my stores; the period's latest week in gold (the one gold element)
-  const cx0=mx,cy0=top2,cw=1040,ch=Math.max(300,H-150-(top2+40));x.fillStyle=T2;x.font=F(400,18);x.fillText(C().name+' units sold in my stores, by week',cx0,cy0);
+  const cx0=mx,cy0=top2,cw=1040,ch=Math.max(300,H-150-(top2+40));x.fillStyle=T2;x.font=F(400,18);x.fillText(C().name+' units sold in '+(R.scope==='patch'?'my patch':'Currys stores')+', by week',cx0,cy0);
   const vals=R.chart.map(c=>c.v||0),mxv=Math.max(1,...vals)*1.15,n=vals.length,bw=Math.min(78,cw/n*0.62),gap=cw/n;const base=cy0+40+ch;
   x.fillStyle='rgba(255,255,255,.16)';x.fillRect(cx0,base,cw,1);
   R.chart.forEach((c,i)=>{const bx=cx0+i*gap+(gap-bw)/2;if(c.v==null){x.fillStyle=T3;x.font=F(400,16);x.textAlign='center';x.fillText('n/a',bx+bw/2,base-12);x.fillText(perLabel(c.w).replace(/ \d{4}$/,''),bx+bw/2,base+28);x.textAlign='left';return}const h=c.v/mxv*ch;const last=i===n-1;x.fillStyle=last?GD:c.cur?BL:'rgba(0,153,204,.45)';x.fillRect(bx,base-h,bw,h);
     x.fillStyle=last?'#fff':T2;x.font=F(last?700:400,18);x.textAlign='center';x.fillText(fmtN(c.v),bx+bw/2,base-h-12);x.fillStyle=T3;x.font=F(400,16);x.fillText(perLabel(c.w).replace(/ \d{4}$/,''),bx+bw/2,base+28);x.textAlign='left'});
   // right column: biggest gains and top products
-  const rx=1300,rw=W-mx-rx;let y=top2;const avail=H-118-top2,need=18+4*44+64+18+4*46,k=Math.min(1,avail/need);const G=44*k,P2=46*k,SP=64*k;x.fillStyle=T2;x.font=F(400,18);x.fillText('Biggest gains'+(R.plabel?(R.cmpWeekly?', weekly average vs ':' vs ')+R.plabel:''),rx,y);y+=18;
+  const rx=1300,rw=W-mx-rx;let y=top2;const avail=H-118-top2,need=18+4*44+64+18+4*46,k=Math.min(1,avail/need);const G=44*k,P2=46*k,SP=64*k;x.fillStyle=T2;x.font=F(400,18);x.fillText((R.scope==='patch'?'Biggest gains in my patch':'Biggest store gains')+(R.plabel?(R.cmpWeekly?', weekly average vs ':' vs ')+R.plabel:''),rx,y);y+=18;
   (R.gains.length?R.gains:[{s:null}]).forEach(r=>{y+=G;x.fillStyle='rgba(255,255,255,.12)';x.fillRect(rx,y-30,rw,1);if(!r.s){x.fillStyle=T3;x.font=F(400,20);x.fillText('No earlier period to compare yet',rx,y);return}
     x.fillStyle='#fff';x.font=F(400,20);x.fillText(SN(r.s),rx,y);x.textAlign='right';x.fillStyle=UP;x.font=F(600,20);x.fillText(fmtN(r.p)+' to '+fmtN(r.c),rx+rw,y);x.textAlign='left'});
-  y+=SP;x.fillStyle=T2;x.font=F(400,18);x.fillText('Top products in my stores, '+R.label,rx,y);y+=18;const pm=Math.max(1,...R.prods.map(p=>p[1]));
+  y+=SP;x.fillStyle=T2;x.font=F(400,18);x.fillText('Top products in '+(R.scope==='patch'?'my patch':'Currys stores')+', '+R.label,rx,y);y+=18;const pm=Math.max(1,...R.prods.map(p=>p[1]));
   (R.prods.length?R.prods:[[null,0]]).forEach(([nm,v])=>{y+=P2;if(!nm){x.fillStyle=T3;x.font=F(400,20);x.fillText('No product detail for this period',rx,y);return}
     x.fillStyle='#fff';x.font=F(400,18);let t=String(nm).split(' - ')[0];const full=t;while(x.measureText(t).width>rw-90&&t.length>4)t=t.slice(0,-2);if(t!==full)t=t.trim()+'…';x.fillText(t,rx,y-8);
     x.fillStyle=BL;x.fillRect(rx,y+2,(rw-90)*v/pm,8);x.textAlign='right';x.fillStyle='#fff';x.font=F(600,18);x.fillText(fmtN(v),rx+rw,y+10);x.textAlign='left'});
   // footnote with sources
-  x.fillStyle=T3;x.font=F(400,16);const src='Units. My stores: the stores in my '+C().name+' call file.'+(Y&&Y.scope==='chain'?' Year on year: '+C().name+' across all Currys channels, from the retailer report.':'')+' Sales: '+([...new Set(R.files.map(f=>f.replace(/\.[a-z]+$/i,'').replace(/_+/g,' ').replace(/\s*\(?\d+\)?\s*$/,'').trim()))].join(', ')||'uploaded sales files')+'. Visits and RTS: Compass. Prepared by '+(DB.settings.name||'nonplusultra')+', nonplusultra, '+nice(today())+'.';
+  x.fillStyle=T3;x.font=F(400,16);const src=(R.scope==='patch'?'Units, my patch: the '+R.nPatch+' Currys stores in my '+C().name+' call file for this period, '+(R.share!=null?R.share.toFixed(1)+'% of Currys store sales':'')+' (online not included). Sales: ':'Units, all Currys stores (online not included). Sales: ')+([...new Set(R.files.map(f=>f.replace(/\.[a-z]+$/i,'').replace(/_+/g,' ').replace(/\s*\(?\d+\)?\s*$/,'').trim()))].join(', ')||'uploaded sales files')+'. Prepared by '+(DB.settings.name?DB.settings.name+', nonplusultra':'nonplusultra')+', '+nice(today())+'.';
   wrap(src,W-2*mx,F(400,16)).slice(0,2).forEach((l,i)=>x.fillText(l,mx,H-64+i*22))}
 function viewReports(){const ks=repKeys(REPK);if(!ks.length)return '<h1 style="margin-top:4px">Reports</h1><div class="empty">'+ic('bars')+'<h2>Upload sales data first</h2><p class="small" style="margin:6px 0 16px">Reports are built from the sales report and your call file.</p><button class="btn gold" data-act="upload">'+ic('upload')+'Upload</button></div>';
   if(!REPKEY||!ks.includes(REPKEY))REPKEY=ks[ks.length-1];const c=C();
   return '<div class="row between" style="margin-top:4px"><h1>Reports</h1><div class="seg">'+[['week','Week'],['month','Month'],['quarter','Quarter']].map(([k,l])=>'<button data-repk="'+k+'" aria-pressed="'+(REPK===k)+'">'+l+'</button>').join('')+'</div></div>'+
+    '<div class="seg" style="margin-top:10px">'+[['all','All Currys stores'],['patch','My patch']].map(([k,l])=>'<button data-reps="'+k+'" aria-pressed="'+(REPS===k)+'">'+l+'</button>').join('')+'</div>'+
     '<label class="f" for="repKey">Period</label><select id="repKey">'+ks.slice().reverse().map(k=>'<option value="'+k+'"'+(k===REPKEY?' selected':'')+'>'+repLabel(REPK,k)+'</option>').join('')+'</select>'+
     (c.logo?'':'<div class="card small warn" style="margin-top:10px">'+ic('warn')+' No '+esc(c.name)+' logo yet, so the slide shows only the nonplusultra mark. <button class="link" data-act="clients">Add the logo</button></div>')+
     (!DB.settings.name?'<div class="card small" style="margin-top:10px">Add your name in More, then Home, hours and work days, so the slide says who prepared it.</div>':'')+
     '<div class="card" style="padding:6px;margin-top:10px"><canvas id="repCanvas" style="width:100%;height:auto;display:block;border-radius:4px" aria-label="Report slide preview"></canvas></div>'+
     '<div class="row" style="flex-wrap:wrap"><button class="btn gold grow" data-act="reppng">'+ic('upload')+'Download slide (PNG)</button>'+(navigator.canShare?'<button class="btn grow" data-act="repshare">'+ic('copy')+'Share</button>':'')+'</div>'+
     '<p class="tiny muted" style="margin-top:8px">The slide is 1920 by 1080, the size of a 16:9 slide: drop it into an email, the weekly deck or Google Slides as it is.</p>'}
-async function renderReport(){const cv=$('#repCanvas');if(!cv)return;await drawReport(cv,repData(REPK,REPKEY))}
-function repFile(){return (C().name+'_'+(REPK==='week'?'Weekly':REPK==='month'?'Monthly':'Quarterly')+'_report_'+repLabel(REPK,REPKEY)).replace(/\s+/g,'_')+'.png'}
+async function renderReport(){const cv=$('#repCanvas');if(!cv)return;await drawReport(cv,repData(REPK,REPKEY,REPS))}
+function repFile(){return (C().name+'_'+(REPS==='patch'?'My_patch_':'')+(REPK==='week'?'Weekly':REPK==='month'?'Monthly':'Quarterly')+'_report_'+repLabel(REPK,REPKEY)).replace(/\s+/g,'_')+'.png'}
 // ===== Render and events
 function render(){const c=C();$('#clientName').textContent=c.name;$('#clientDot').style.background=c.color;
   document.querySelectorAll('nav.tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.tab===TAB?'page':'false'));
@@ -1011,6 +1025,7 @@ document.addEventListener('click',async e=>{const el=e.target.closest('button,a'
   if(d.mc){MAPCOL=d.mc;render();return}
   if(d.ss){STSORT=d.ss;render();return}
   if(d.repk){REPK=d.repk;REPKEY=null;render();return}
+  if(d.reps){REPS=d.reps;render();return}
   if(d.stall!=null){STALL=d.stall==='1';render();return}
   if(d.wd!==undefined||d.swd!==undefined){const p=el.getAttribute('aria-pressed')==='true';el.setAttribute('aria-pressed',String(!p));if(d.wd!==undefined){const w=+d.wd;const s=DB.settings;s.workDays=p?s.workDays.filter(x=>x!==w):[...new Set(s.workDays.concat([w]))];save()}return}
   if(d.client){DB.client=d.client;save();closeSheet();render();toast('Switched to '+C().name);return}
